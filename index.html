@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DaMATH Game</title>
+<style>
+body {
+  margin:0; font-family: 'Segoe UI', sans-serif; background:#f0e6d2; display:flex; flex-direction:column; align-items:center; padding:20px;
+}
+header {
+  display:flex; justify-content:space-between; align-items:center; width:100%; max-width:700px; margin-bottom:20px; padding:10px 20px;
+  background:#ffffffcc; border-radius:12px; box-shadow:0 5px 15px rgba(0,0,0,0.2);
+}
+header div { font-size:18px; font-weight:bold; }
+header button { padding:6px 12px; font-size:16px; border-radius:8px; border:none; background:#f44336; color:white; cursor:pointer; transition:0.3s; }
+header button:hover { background:#d32f2f; }
+.board-container {
+  width:640px; height:640px; border-radius:16px; overflow:hidden; box-shadow:0 8px 25px rgba(0,0,0,0.4); background:#d9cfa6; border:5px solid #8b5e3c;
+}
+.board { display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(8,1fr); width:100%; height:100%; position:relative; }
+.cell { display:flex; justify-content:center; align-items:center; cursor:pointer; transition:background 0.3s, transform 0.3s; font-size:44px; position:relative; }
+.black { background:#5c4a3f; }
+.white { background:#d8c4a6; }
+.piece { width:60px; height:60px; border-radius:50%; display:flex; justify-content:center; align-items:center; font-size:30px; font-weight:bold; color:white;
+  box-shadow:0 4px 8px rgba(0,0,0,0.5); transition: transform 0.3s, box-shadow 0.3s; position:absolute;
+}
+.blue-piece { background:radial-gradient(circle,#6db3ff,#005bbb); }
+.red-piece { background:radial-gradient(circle,#ff7c7c,#af0000); }
+.piece.king { box-shadow: 0 0 15px gold; }
+.highlight { outline:4px solid yellow; box-sizing:border-box; }
+#timer { font-size:22px; font-weight:bold; margin-top:10px; padding:6px 12px; border-radius:8px; background:#ffffffcc; box-shadow:0 3px 10px rgba(0,0,0,0.2);}
+#mathOverlay {
+  position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); display:none; justify-content:center; align-items:center; flex-direction:column;
+}
+#mathOverlay div { color:white; font-size:28px; margin-bottom:10px; text-align:center; }
+#mathOverlay input { font-size:24px; padding:10px; margin-top:10px; width:220px; text-align:center; border-radius:8px; border:2px solid #ccc; }
+#mathOverlay button { margin-top:15px; font-size:18px; padding:8px 16px; border-radius:8px; background:#4caf50; color:white; border:none; cursor:pointer; transition:background 0.3s;}
+#mathOverlay button:hover { background:#45a049; }
+.new-game-anim {
+  position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); font-size:48px; color:#4caf50; font-weight:bold;
+  background:rgba(255,255,255,0.9); padding:20px 40px; border-radius:12px; opacity:0; pointer-events:none; transition:opacity 0.5s;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div id="status">Turn: <span style="color:blue">BLUE</span></div>
+  <div id="score">Blue: 0 | Red: 0</div>
+  <button id="resetBtn">Reset</button>
+</header>
+
+<div class="board-container">
+  <div id="board" class="board"></div>
+</div>
+
+<div id="timer">Timer: 15</div>
+
+<div class="new-game-anim" id="newGameAnim">NEW GAME</div>
+
+<audio id="moveSound" src="https://www.soundjay.com/button/sounds/button-16.mp3"></audio>
+<audio id="captureSound" src="https://www.soundjay.com/button/sounds/button-10.mp3"></audio>
+<audio id="newGameSound" src="https://www.soundjay.com/button/sounds/button-3.mp3"></audio>
+
+<div id="mathOverlay">
+  <div id="mathQuestion"></div>
+  <input type="number" id="mathAnswer"/>
+  <button id="submitAnswer">Submit</button>
+</div>
+
+<script>
+const boardEl = document.getElementById("board");
+const statusEl = document.getElementById("status");
+const scoreEl = document.getElementById("score");
+const timerEl = document.getElementById("timer");
+const moveSound = document.getElementById("moveSound");
+const captureSound = document.getElementById("captureSound");
+const newGameSound = document.getElementById("newGameSound");
+const mathOverlay = document.getElementById("mathOverlay");
+const mathQuestionEl = document.getElementById("mathQuestion");
+const mathAnswerEl = document.getElementById("mathAnswer");
+const submitAnswerBtn = document.getElementById("submitAnswer");
+const resetBtn = document.getElementById("resetBtn");
+const newGameAnim = document.getElementById("newGameAnim");
+
+let board=[], selected=null, turn="blue", score={blue:0,red:0};
+let timerInterval=null, mathResolve=null, timeLeft=15;
+
+function generateMathQuestion(){
+  const a=Math.floor(Math.random()*10)+1;
+  const b=Math.floor(Math.random()*10)+1;
+  const ops=['+','-','*']; const op=ops[Math.floor(Math.random()*ops.length)];
+  let answer=0; if(op==='+') answer=a+b; else if(op==='-') answer=a-b; else answer=a*b;
+  return {text:`${a} ${op} ${b} = ?`, answer};
+}
+
+function initBoard(){
+  board=[]; selected=null;
+  for(let r=0;r<8;r++){
+    let row=[];
+    for(let c=0;c<8;c++){
+      let cell={player:null,king:false};
+      if(r<3&&(r+c)%2===1) cell.player="red";
+      if(r>4&&(r+c)%2===1) cell.player="blue";
+      row.push(cell);
+    }
+    board.push(row);
+  }
+  updateStatus(); render();
+}
+
+function updateStatus(){
+  statusEl.innerHTML=`Turn: <span style="color:${turn}">${turn.toUpperCase()}</span>`;
+  scoreEl.textContent=`Blue: ${score.blue} | Red: ${score.red}`;
+}
+
+function render(){
+  boardEl.innerHTML="";
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const cellColor=(r+c)%2===0?"white":"black";
+      const div=document.createElement("div");
+      div.className=`cell ${cellColor}`;
+      div.dataset.row=r; div.dataset.col=c;
+      const piece=board[r][c];
+      if(piece.player){
+        const el=document.createElement("div");
+        el.className=`piece ${piece.player}-piece${piece.king?" king":""}`;
+        el.textContent=piece.king?"♛":"●";
+        div.appendChild(el);
+      }
+      div.onclick=()=>selectCell(r,c);
+      boardEl.appendChild(div);
+    }
+  }
+}
+
+function highlightMoves(r,c){
+  document.querySelectorAll('.cell').forEach(e=>e.classList.remove('highlight'));
+  const moves=[]; const piece=board[r][c];
+  const dirs=piece.king? [[-1,-1],[-1,1],[1,-1],[1,1]]: piece.player==="blue"? [[-1,-1],[-1,1]]:[[1,-1],[1,1]];
+  dirs.forEach(([dr,dc])=>{
+    const nr=r+dr,nc=c+dc;
+    if(nr>=0&&nr<8&&nc>=0&&nc<8&&!board[nr][nc].player) moves.push([nr,nc]);
+    const nr2=r+dr*2, nc2=c+dc*2, mr=r+dr, mc=c+dc;
+    if(nr2>=0&&nr2<8&&nc2>=0&&nc2<8&&board[mr][mc].player&&board[mr][mc].player!==piece.player&&!board[nr2][nc2].player)
+      moves.push([nr2,nc2]);
+  });
+  moves.forEach(([mr,mc])=>document.getElementsByClassName("cell")[mr*8+mc].classList.add("highlight"));
+}
+
+function askMath(question){
+  return new Promise(resolve=>{
+    mathQuestionEl.textContent=question.text;
+    mathAnswerEl.value="";
+    mathOverlay.style.display="flex";
+    timeLeft=15; timerEl.textContent=`Timer: ${timeLeft}`;
+    timerInterval=setInterval(()=>{
+      timeLeft--; timerEl.textContent=`Timer: ${timeLeft}`;
+      if(timeLeft<=0){ clearInterval(timerInterval); mathOverlay.style.display="none"; resolve(null);}
+    },1000);
+    mathResolve=resolve;
+  });
+}
+
+submitAnswerBtn.onclick=()=>{
+  clearInterval(timerInterval);
+  mathOverlay.style.display="none";
+  mathResolve(Number(mathAnswerEl.value));
+};
+
+async function selectCell(r,c){
+  const cell=board[r][c];
+  if(!selected){ if(cell.player===turn){ selected={r,c}; render(); highlightMoves(r,c);} return;}
+  await movePiece(selected.r,selected.c,r,c);
+  selected=null; render(); checkGameOver();
+}
+
+async function movePiece(sr,sc,r,c){
+  const piece=board[sr][sc]; const dr=r-sr, dc=c-sc;
+  if(Math.abs(dr)===1&&Math.abs(dc)===1&&!board[r][c].player){
+    board[r][c]=piece; board[sr][sc]={player:null,king:false}; moveSound.play();
+  }
+  if(Math.abs(dr)===2&&Math.abs(dc)===2){
+    const mr=sr+dr/2, mc=sc+dc/2, middle=board[mr][mc];
+    if(middle.player&&middle.player!==turn){
+      const question=generateMathQuestion();
+      const ans=await askMath(question);
+      if(ans==null||Number(ans)!==question.answer) return;
+      board[r][c]=piece; board[sr][sc]={player:null,king:false}; board[mr][mc]={player:null,king:false};
+      score[turn]+=1; captureSound.play();
+    }
+  }
+  if((turn==="blue"&&r===0)||(turn==="red"&&r===7)) piece.king=true;
+  turn=turn==="blue"?"red":"blue"; updateStatus();
+}
+
+function checkGameOver(){
+  const blue=board.flat().filter(p=>p.player==="blue").length;
+  const red=board.flat().filter(p=>p.player==="red").length;
+  if(blue===0) alert("RED WINS!"); if(red===0) alert("BLUE WINS!");
+}
+
+// Reset button functionality
+resetBtn.onclick = ()=>{
+  clearInterval(timerInterval);
+  selected=null;
+  turn="blue"; score={blue:0,red:0}; timeLeft=15;
+  initBoard();
+  timerEl.textContent=`Timer: ${timeLeft}`;
+  mathOverlay.style.display="none";
+  // Show new game animation
+  newGameAnim.style.opacity="1";
+  newGameSound.play();
+  setTimeout(()=>{newGameAnim.style.opacity="0";},1200);
+};
+
+initBoard();
+</script>
+</body>
+</html>
